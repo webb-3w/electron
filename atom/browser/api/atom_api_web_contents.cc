@@ -549,7 +549,6 @@ void WebContents::DidFinishLoad(content::RenderFrameHost* render_frame_host,
                                 const GURL& validated_url) {
   bool is_main_frame = !render_frame_host->GetParent();
   Emit("did-frame-finish-load", is_main_frame);
-
   if (is_main_frame)
     Emit("did-finish-load");
 }

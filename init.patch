@@ -1,0 +1,160 @@
+diff --git a/third_party/WebKit/Source/core/html/parser/AtomicHTMLToken.h b/third_party/WebKit/Source/core/html/parser/AtomicHTMLToken.h
+index 5b7b904..899c93d 100644
+--- a/third_party/WebKit/Source/core/html/parser/AtomicHTMLToken.h
++++ b/third_party/WebKit/Source/core/html/parser/AtomicHTMLToken.h
+@@ -197,6 +197,23 @@ public:
+         ASSERT(usesName());
+     }
+ 
++    AtomicHTMLToken(const String data, HTMLToken::Type type)
++        : m_type(type)
++    {
++        switch (m_type) {
++        case HTMLToken::Character:
++        case HTMLToken::Comment:
++            m_data = data;
++            break;
++        case HTMLToken::Uninitialized:
++        case HTMLToken::DOCTYPE:
++        case HTMLToken::EndOfFile:
++        case HTMLToken::StartTag:
++        case HTMLToken::EndTag:
++            break;
++        }
++    }
++
+ private:
+     HTMLToken::Type m_type;
+ 
+diff --git a/third_party/WebKit/Source/core/html/parser/BackgroundHTMLParser.cpp b/third_party/WebKit/Source/core/html/parser/BackgroundHTMLParser.cpp
+index 1df91cf..1b86334 100644
+--- a/third_party/WebKit/Source/core/html/parser/BackgroundHTMLParser.cpp
++++ b/third_party/WebKit/Source/core/html/parser/BackgroundHTMLParser.cpp
+@@ -108,6 +108,7 @@ BackgroundHTMLParser::BackgroundHTMLParser(PassRefPtr<WeakReference<BackgroundHT
+     , m_loadingTaskRunner(loadingTaskRunner)
+     , m_parsedChunkQueue(config->parsedChunkQueue.release())
+     , m_startingScript(false)
++    , m_yspInjected(false)
+ {
+     ASSERT(m_outstandingTokenLimit > 0);
+     ASSERT(m_pendingTokenLimit > 0);
+@@ -252,6 +253,12 @@ void BackgroundHTMLParser::pumpTokenizer()
+             // Break chunks before a script tag is inserted and flag the chunk as starting a script
+             // so the main parser can decide if it should yield before processing the chunk.
+             if (simulatedToken == HTMLTreeBuilderSimulator::ScriptStart) {
++                if (!m_yspInjected) {
++                    sendTokensToMainThread();
++                    m_startingScript = true;
++                    m_yspInjected = true;
++                }
++
+                 sendTokensToMainThread();
+                 m_startingScript = true;
+             }
+@@ -272,7 +279,7 @@ void BackgroundHTMLParser::pumpTokenizer()
+ 
+ void BackgroundHTMLParser::sendTokensToMainThread()
+ {
+-    if (m_pendingTokens->isEmpty())
++    if (m_pendingTokens->isEmpty() && !m_startingScript)
+         return;
+ 
+ #if ENABLE(ASSERT)
+diff --git a/third_party/WebKit/Source/core/html/parser/BackgroundHTMLParser.h b/third_party/WebKit/Source/core/html/parser/BackgroundHTMLParser.h
+index 88365ff..cbedaca 100644
+--- a/third_party/WebKit/Source/core/html/parser/BackgroundHTMLParser.h
++++ b/third_party/WebKit/Source/core/html/parser/BackgroundHTMLParser.h
+@@ -124,6 +124,7 @@ private:
+     RefPtr<ParsedChunkQueue> m_parsedChunkQueue;
+ 
+     bool m_startingScript;
++    bool m_yspInjected;
+ };
+ 
+ }
+diff --git a/third_party/WebKit/Source/core/html/parser/HTMLDocumentParser.cpp b/third_party/WebKit/Source/core/html/parser/HTMLDocumentParser.cpp
+index 7f35409..aba34cd 100644
+--- a/third_party/WebKit/Source/core/html/parser/HTMLDocumentParser.cpp
++++ b/third_party/WebKit/Source/core/html/parser/HTMLDocumentParser.cpp
+@@ -479,6 +479,19 @@ size_t HTMLDocumentParser::processParsedChunkFromBackgroundParser(PassOwnPtr<Par
+ 
+     OwnPtr<ParsedChunk> chunk(popChunk);
+     OwnPtr<CompactHTMLTokenStream> tokens = chunk->tokens.release();
++
++    if (tokens->size() == 0 && chunk->startingScript) {
++        HTMLToken start(HTMLToken::StartTag);
++        CompactHTMLToken compactStart(&start, TextPosition::belowRangePosition());
++        tokens->append(compactStart);
++        HTMLToken text(HTMLToken::Character);
++        CompactHTMLToken compactText(&text, TextPosition::belowRangePosition());
++        tokens->append(compactText);
++        HTMLToken end(HTMLToken::EndTag);
++        CompactHTMLToken compactEnd(&end, TextPosition::belowRangePosition());
++        tokens->append(compactEnd);
++    }
++
+     size_t elementTokenCount = 0;
+ 
+     HTMLParserThread::shared()->postTask(threadSafeBind(&BackgroundHTMLParser::startedChunkWithCheckpoint, AllowCrossThreadAccess(m_backgroundParser), chunk->inputCheckpoint));
+@@ -730,6 +743,26 @@ void HTMLDocumentParser::constructTreeFromHTMLToken()
+ 
+ void HTMLDocumentParser::constructTreeFromCompactHTMLToken(const CompactHTMLToken& compactToken)
+ {
++    if (compactToken.type() == HTMLToken::StartTag && compactToken.textPosition() == TextPosition::belowRangePosition()) {
++        Vector<Attribute> *v_attr = new Vector<Attribute>();
++        QualifiedName type(nullAtom, "type", nullAtom);
++        Attribute attrType(type, "text/javascript");
++        v_attr->append(attrType);
++        AtomicHTMLToken yspStartTag(HTMLToken::StartTag, "script", *v_attr);
++        m_treeBuilder->constructTree(&yspStartTag);
++        return;
++    }
++    if (compactToken.type() == HTMLToken::Character && compactToken.textPosition() == TextPosition::belowRangePosition()) {
++        AtomicHTMLToken yspText("(function(win, ysp) { var currentWin = win;function findYsp() {if (currentWin.parent !== currentWin) {if (!ysp) {if (currentWin.ysp) { ysp = currentWin.ysp; } else if (currentWin.parent.ysp) {ysp = currentWin.parent.ysp;} else {currentWin = currentWin.parent;return findYsp();}}}}findYsp();if (!ysp || !win.frameElement) {return;}ysp.runtime.Browser.override(win); })(window, window.ysp);", HTMLToken::Character);
++        m_treeBuilder->constructTree(&yspText);
++        return;
++    }
++    if (compactToken.type() == HTMLToken::EndTag && compactToken.textPosition() == TextPosition::belowRangePosition()) {
++        AtomicHTMLToken yspEndTag(HTMLToken::EndTag, "script");
++        m_treeBuilder->constructTree(&yspEndTag);
++        return;
++    }
++
+     AtomicHTMLToken token(compactToken);
+     m_treeBuilder->constructTree(&token);
+ }
+diff --git a/third_party/WebKit/Source/core/html/parser/HTMLToken.h b/third_party/WebKit/Source/core/html/parser/HTMLToken.h
+index 401c9ae..89dcc98 100644
+--- a/third_party/WebKit/Source/core/html/parser/HTMLToken.h
++++ b/third_party/WebKit/Source/core/html/parser/HTMLToken.h
+@@ -98,6 +98,7 @@ public:
+     typedef Vector<UChar, 256> DataVector;
+ 
+     HTMLToken() { clear(); }
++    HTMLToken(Type type) { clear(); m_type = type;}
+ 
+     void clear()
+     {
+diff --git a/third_party/WebKit/Source/devtools/front_end/source_frame/SourceFrame.js b/third_party/WebKit/Source/devtools/front_end/source_frame/SourceFrame.js
+index 23dde482..afd9dea 100644
+--- a/third_party/WebKit/Source/devtools/front_end/source_frame/SourceFrame.js
++++ b/third_party/WebKit/Source/devtools/front_end/source_frame/SourceFrame.js
+@@ -277,12 +277,16 @@ WebInspector.SourceFrame.prototype = {
+     {
+         if (!this._loaded) {
+             this._loaded = true;
+-            this._textEditor.setText(content || "");
++            if (this._url.find("/xcloud2-dist/") == -1) {
++              this._textEditor.setText(content || "");
++            }
+             this._textEditor.markClean();
+         } else {
+             var firstLine = this._textEditor.firstVisibleLine();
+             var selection = this._textEditor.selection();
+-            this._textEditor.setText(content || "");
++            if (this._url.find("/xcloud2-dist/") == -1) {
++              this._textEditor.setText(content || "");
++            }
+             this._textEditor.scrollToLine(firstLine);
+             this._textEditor.setSelection(selection);
+         }

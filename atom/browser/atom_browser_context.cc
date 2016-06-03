@@ -7,6 +7,7 @@
 #include "atom/browser/atom_browser_main_parts.h"
 #include "atom/browser/atom_download_manager_delegate.h"
 #include "atom/browser/browser.h"
+#include "atom/browser/electron_request_interceptor.h"
 #include "atom/browser/net/atom_cert_verifier.h"
 #include "atom/browser/net/atom_network_delegate.h"
 #include "atom/browser/net/atom_ssl_config_service.h"
@@ -132,6 +133,8 @@ AtomBrowserContext::CreateURLRequestJobFactory(
       url::kFtpScheme,
       make_scoped_ptr(new net::FtpProtocolHandler(
           new net::FtpNetworkLayer(host_resolver))));
+
+  interceptors->push_back(new electron::ElectronRequestInterceptor());
 
   // Set up interceptors in the reverse order.
   scoped_ptr<net::URLRequestJobFactory> top_job_factory =

@@ -235,6 +235,7 @@
         'vendor/node/deps/http_parser',
         'vendor/node/deps/uv/include',
         'vendor/node/deps/openssl/openssl/include/',
+        'vendor/brightray/vendor/download/libchromiumcontent/src/third_party/icu/source/i18n/',
         # The `node.h` is using `#include"v8.h"`.
         '<(libchromiumcontent_src_dir)/v8/include',
         # The `node.h` is using `#include"ares.h"`.

@@ -2,6 +2,7 @@
 
 #include "base/json/json_reader.h"
 #include "base/values.h"
+#include "third_party/icu/source/i18n/unicode/regex.h"
 
 SingletonSendMessage *SingletonSendMessage::GetInstance() {
     static SingletonSendMessage m_Instance;
@@ -34,8 +35,14 @@ void SingletonSendMessage::Init(std::string message, std::string filepath) {
 }
 
 bool SingletonSendMessage::getMatcher(std::string src, std::string *dest) {
+  icu::UnicodeString input(src.c_str());
+  UErrorCode status = U_ZERO_ERROR;
   for(size_t i = 0; i < url_need_replace.size(); i++){
-    if(src == url_need_replace[i]){
+    icu::UnicodeString pattern(url_need_replace[i].c_str());
+    icu::RegexMatcher match(pattern, input, 0, status);
+
+    if (match.find()) {
+    //if(src == url_need_replace[i]){
       *dest = url_replace_to[i];
       return true;
     }

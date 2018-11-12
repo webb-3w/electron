@@ -27,6 +27,7 @@
 #include "ipc/ipc_buildflags.h"
 #include "services/service_manager/embedder/switches.h"
 #include "services/service_manager/sandbox/switches.h"
+#include "services/service_manager/zygote/common/zygote_buildflags.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
@@ -212,6 +213,15 @@ void AtomMainDelegate::PreSandboxStartup() {
   // Disable setuid sandbox since it is not longer required on
   // linux(namespace sandbox is available on most distros).
   command_line->AppendSwitch(service_manager::switches::kDisableSetuidSandbox);
+
+#if BUILDFLAG(USE_ZYGOTE_HANDLE)
+  // When using the zygote, we must launch the zygote with --no-sandbox if the
+  // renderers should be unsandboxed. Mixed-sandbox mode is not supported when
+  // using the zygote.
+  if (!command_line->HasSwitch(switches::kEnableSandbox)) {
+    command_line->AppendSwitch(service_manager::switches::kNoSandbox);
+  }
+#endif
 
   // Allow file:// URIs to read other file:// URIs by default.
   command_line->AppendSwitch(::switches::kAllowFileAccessFromFiles);

@@ -1,14 +1,16 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: deepak1556 <hop2deep@gmail.com>
-Date: Thu, 20 Sep 2018 17:45:59 -0700
+Date: Wed, 14 Nov 2018 20:38:46 +0530
 Subject: frame_host_manager.patch
 
+Allows embedder to intercept site instances chosen by chromium
+and respond with custom instance. 
 
 diff --git a/content/browser/frame_host/render_frame_host_manager.cc b/content/browser/frame_host/render_frame_host_manager.cc
-index 49ad391a313351085819389c537e8e73562194c3..5c0f68f9821f5717e4b194fcbd89a032d173aa9f 100644
+index 49ad391a313351085819389c537e8e73562194c3..cf9bbe815830059bd4221d59fa0f9ec7c068c74a 100644
 --- a/content/browser/frame_host/render_frame_host_manager.cc
 +++ b/content/browser/frame_host/render_frame_host_manager.cc
-@@ -1961,6 +1961,18 @@ RenderFrameHostManager::GetSiteInstanceForNavigationRequest(
+@@ -1961,6 +1961,17 @@ RenderFrameHostManager::GetSiteInstanceForNavigationRequest(
    bool was_server_redirect = request.navigation_handle() &&
                               request.navigation_handle()->WasServerRedirect();
  
@@ -26,7 +28,7 @@ index 49ad391a313351085819389c537e8e73562194c3..5c0f68f9821f5717e4b194fcbd89a032
    if (frame_tree_node_->IsMainFrame()) {
      // Renderer-initiated main frame navigations that may require a
      // SiteInstance swap are sent to the browser via the OpenURL IPC and are
-@@ -1980,6 +1992,19 @@ RenderFrameHostManager::GetSiteInstanceForNavigationRequest(
+@@ -1980,6 +1991,51 @@ RenderFrameHostManager::GetSiteInstanceForNavigationRequest(
                                                 request.common_params().url));
      no_renderer_swap_allowed |=
          request.from_begin_navigation() && !can_renderer_initiate_transfer;
@@ -78,7 +80,7 @@ index 49ad391a313351085819389c537e8e73562194c3..5c0f68f9821f5717e4b194fcbd89a032
    } else {
      // Subframe navigations will use the current renderer, unless specifically
      // allowed to swap processes.
-@@ -1991,18 +2016,9 @@ RenderFrameHostManager::GetSiteInstanceForNavigationRequest(
+@@ -1991,23 +2047,17 @@ RenderFrameHostManager::GetSiteInstanceForNavigationRequest(
    if (no_renderer_swap_allowed)
      return scoped_refptr<SiteInstance>(current_site_instance);
  
@@ -107,10 +109,10 @@ index 49ad391a313351085819389c537e8e73562194c3..5c0f68f9821f5717e4b194fcbd89a032
  }
  
 diff --git a/content/public/browser/content_browser_client.cc b/content/public/browser/content_browser_client.cc
-index bb54b89bef5c6f32e7b4a056336c85494e2a04de..2d0633f38ddfc0fa1999674903b1d5e8952e22d5 100644
+index 12411003ad4d54576117cc719bff804da1706170..f7f9dba898b1b6212a0ed5dab7f12a84869f70a9 100644
 --- a/content/public/browser/content_browser_client.cc
 +++ b/content/public/browser/content_browser_client.cc
-@@ -47,6 +47,16 @@ void OverrideOnBindInterface(const service_manager::BindSourceInfo& remote_info,
+@@ -49,6 +49,16 @@ void OverrideOnBindInterface(const service_manager::BindSourceInfo& remote_info,
                                                           handle);
  }
  
@@ -128,10 +130,12 @@ index bb54b89bef5c6f32e7b4a056336c85494e2a04de..2d0633f38ddfc0fa1999674903b1d5e8
      const MainFunctionParams& parameters) {
    return nullptr;
 diff --git a/content/public/browser/content_browser_client.h b/content/public/browser/content_browser_client.h
-index 89674a18276e34eebc0038e588ea4629a4eaca6c..d3e46e8ce76914a2f5b986307e885edac668c77b 100644
+index 89674a18276e34eebc0038e588ea4629a4eaca6c..a0607b1b67a77e77946a6996524fba9a05a302e7 100644
 --- a/content/public/browser/content_browser_client.h
 +++ b/content/public/browser/content_browser_client.h
-@@ -203,6 +203,15 @@ class CONTENT_EXPORT ContentBrowserClient {
+@@ -201,8 +201,37 @@ CONTENT_EXPORT void OverrideOnBindInterface(
+ // the observer interfaces.)
+ class CONTENT_EXPORT ContentBrowserClient {
   public:
 +  // Identifies the type of site instance to use for a navigation.
 +  enum SiteInstanceForNavigationType {
@@ -148,6 +152,7 @@ index 89674a18276e34eebc0038e588ea4629a4eaca6c..d3e46e8ce76914a2f5b986307e885eda
 +    // Delegate the site instance creation to Chromium.
 +    ASK_CHROMIUM
 +  };
++
    virtual ~ContentBrowserClient() {}
  
 +  // Electron: Allows overriding the SiteInstance when navigating.
@@ -161,7 +166,7 @@ index 89674a18276e34eebc0038e588ea4629a4eaca6c..d3e46e8ce76914a2f5b986307e885eda
 +  // Electron: Registers a pending site instance during a navigation.
 +  virtual void RegisterPendingSiteInstance(
 +      content::RenderFrameHost* rfh,
-+      content::SiteInstance* pending_site_instance){};
++      content::SiteInstance* pending_site_instance) {}
 +
    // Allows the embedder to set any number of custom BrowserMainParts
    // implementations for the browser startup code. See comments in
